@@ -55,8 +55,10 @@ App de controle financeiro familiar com multi-usuarios, permissoes, ingestao de 
 │       │   ├── rule-matcher.ts      # Matching de regras de categorização (funções puras)
 │       │   ├── reconciliation-matcher.ts  # Matching manual↔OFX para reconciliação (autoMatchExact + rankCandidates com tolerâncias)
 │       │   ├── balance-checker.ts   # Verificação de divergência saldo sistema vs banco via RPC
+│       │   ├── import-validation.ts # Validação de payload de importação (pure functions, UUID/schema/limites)
+│       │   ├── rate-limiter.ts      # Rate limiter in-memory sliding-window (singleton para import confirm)
 │       │   ├── __fixtures__/        # Fixtures OFX para testes (nubank.ofx, viacredi.ofx)
-│       │   └── __tests__/           # Testes unitários Vitest (6 arquivos, 107 testes)
+│       │   └── __tests__/           # Testes unitários Vitest (8 arquivos, ~149 testes)
 │       └── types/
 │           ├── index.ts             # Tipos compartilhados
 │           └── ofx-js.d.ts          # Type declarations para ofx-js
@@ -200,7 +202,7 @@ python3 scripts/gen_env.py
 ### Unitários (Vitest)
 
 - Framework: Vitest 4 (`apps/web/vitest.config.ts`)
-- 6 test suites em `apps/web/src/lib/__tests__/`: date-utils, formatters, ofx-parser, rule-matcher, reconciliation-matcher, balance-checker
+- 8 test suites em `apps/web/src/lib/__tests__/`: date-utils, formatters, ofx-parser, rule-matcher, reconciliation-matcher, balance-checker, import-validation, rate-limiter
 - Fixtures OFX em `apps/web/src/lib/__fixtures__/`
 - Alias `@/*` configurado no vitest.config.ts
 
@@ -219,7 +221,7 @@ python3 scripts/gen_env.py
 ## API Routes (Next.js)
 
 - `POST /api/imports/parse` — recebe arquivo OFX via FormData, retorna transações parseadas (sem autenticação, roda server-side)
-- `POST /api/imports/confirm` — recebe transações + accountId + familyId, cria `import_batch` e insere transações. Usa `SUPABASE_SERVICE_ROLE_KEY` server-side com Bearer token do usuário para autenticação. Deduplicação por `external_id` (FITID) e hash do batch.
+- `POST /api/imports/confirm` — recebe transações + accountId + familyId, cria `import_batch` e insere transações. Hardened: (1) Bearer token verificado via GoTrue `getUser`; (2) membership check explícito (user deve ser `owner`/`admin`/`member` na família); (3) account ownership check (accountId deve pertencer à familyId, contas privadas só pelo dono); (4) payload validado com schema estrito via `import-validation.ts` (UUIDs, datas, limites de tamanho, max 5000 transações); (5) rate limiting in-memory (10 req/min por usuário via `rate-limiter.ts`); (6) logs sanitizados (nunca incluem payload completo ou secrets); (7) usa `SUPABASE_SERVICE_ROLE_KEY` apenas server-side após auth explícita. Deduplicação por `external_id` (FITID) e hash do batch.
 
 ## Navegação
 
@@ -249,7 +251,7 @@ Não usar `next-pwa` ou cache offline agressivo — dados dependem do Supabase e
 8. Contas privadas (`visibility = 'private'`) só são visíveis ao dono
 9. Importação OFX: parsing via `ofx-js` no frontend, confirmação via API Route com `service_role`. Deduplicação dupla: por `raw_hash` no `import_batches` (idempotência de arquivo) e por `external_id`/FITID nas `transactions` (idempotência de transação). A descrição original do extrato é preservada em `original_description` para referência ao renomear
 10. Transações importadas podem ser editadas (descrição, categoria) via modal de edição acessível pela lista de lançamentos. Data de transações OFX não é editável. "Sem categoria" aparece como link clicável que abre o modal de edição
-11. API Route `/api/imports/confirm` requer `SUPABASE_SERVICE_ROLE_KEY` como env var no servidor
+11. API Route `/api/imports/confirm` requer `SUPABASE_SERVICE_ROLE_KEY` como env var no servidor. Hardened com: membership check explícito (requer role `owner`/`admin`/`member`), account ownership check (conta deve pertencer à família, privada só pelo dono), validação de schema estrita (`import-validation.ts`), rate limiting in-memory (10 req/min/usuário via `rate-limiter.ts`), logs sanitizados (sem payload/secrets)
 12. **Regras de categorização automática**: regras definidas na tabela `rules` categorizam transações OFX automaticamente. Match por `description_contains` (case-insensitive substring), `description_regex` (regex flag `i`), `amount_exact`/`amount_min`/`amount_max` (valores absolutos), `day_of_month` (1-31), `date_after`/`date_before` (YYYY-MM-DD, inclusivo). Ação: `set_category_id` (obrigatório), `set_description` (opcional). Avaliadas em ordem de `priority` (ASC) + `created_at` (ASC). Aplicadas client-side no preview de importação com overrides manuais, e server-side como fallback para transações sem categoria após inserção
 13. **Auto-match de conta OFX**: contas com `ofx_bank_id` e `ofx_account_id` preenchidos são automaticamente selecionadas na importação OFX quando o `bankId` e `accountId` do arquivo coincidem. Campos editáveis no modal de conta (visíveis quando "Conta reconciliável" está ativo), com opção de preencher via upload de arquivo OFX. Índice único `accounts_ofx_ids_unique` em `(family_id, ofx_bank_id, ofx_account_id)` impede duplicatas
 14. **Reconciliação**: contas marcadas como `is_reconcilable` podem receber importação OFX. Após importação, `reconciled_until` e `reconciled_balance` são atualizados (só avança, nunca retrocede). Lançamentos manuais com data ≤ `reconciled_until` são bloqueados para `member`/`viewer` (trigger SQL + validação frontend). Admin/owner vê aviso mas pode prosseguir. Na tela de importação, só contas reconciliáveis aparecem no seletor

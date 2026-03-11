@@ -1,69 +1,121 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import type { ParsedTransaction } from "@/lib/ofx-parser";
+import { validateImportPayload } from "@/lib/import-validation";
+import { getImportRateLimiter } from "@/lib/rate-limiter";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-type TransactionWithCategory = ParsedTransaction & {
-  category_id?: string | null;
-  override_description?: string;
-};
-
-type ImportRequest = {
-  accountId: string;
-  familyId: string;
-  transactions: TransactionWithCategory[];
-  source: string;
-  rawHash: string;
-  startDate?: string | null;
-  endDate?: string | null;
-  ledgerBalance?: number | null;
-};
+/** Create a service-role client (bypasses RLS — used after explicit auth checks). */
+function getServiceClient() {
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
 
 export async function POST(request: NextRequest) {
   try {
-    // Get authorization header
+    // ── 1. Auth: extract and verify Bearer token ──────────────────────
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { error: "Não autorizado" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
     const token = authHeader.slice(7);
+    const serviceClient = getServiceClient();
 
-    // Create Supabase client with user token
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
-    });
-
-    // Verify user
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const {
+      data: { user },
+      error: authError,
+    } = await serviceClient.auth.getUser(token);
     if (authError || !user) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    // ── 2. Rate limiting (per user) ───────────────────────────────────
+    const limiter = getImportRateLimiter();
+    if (!limiter.check(user.id)) {
       return NextResponse.json(
-        { error: "Não autorizado" },
-        { status: 401 }
+        { error: "Muitas requisições. Aguarde um momento." },
+        { status: 429 },
       );
     }
 
-    const body: ImportRequest = await request.json();
-    const { accountId, familyId, transactions, source, rawHash, startDate, endDate, ledgerBalance } = body;
-
-    if (!accountId || !familyId || !transactions?.length) {
+    // ── 3. Parse & validate payload ───────────────────────────────────
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: "Dados incompletos" },
-        { status: 400 }
+        { error: "JSON inválido" },
+        { status: 400 },
       );
     }
 
-    // Check for existing import batch with same hash (idempotency)
-    const { data: existingBatch } = await supabase
+    const validation = validateImportPayload(rawBody);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400 },
+      );
+    }
+
+    const {
+      accountId,
+      familyId,
+      transactions,
+      source,
+      rawHash,
+      startDate,
+      endDate,
+      ledgerBalance,
+    } = validation.data;
+
+    // ── 4. Authorization: user must be a writer in this family ────────
+    const { data: membership } = await serviceClient
+      .from("memberships")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("family_id", familyId)
+      .maybeSingle();
+
+    if (!membership) {
+      return NextResponse.json(
+        { error: "Acesso negado: você não pertence a esta família" },
+        { status: 403 },
+      );
+    }
+
+    const writeRoles = new Set(["owner", "admin", "member"]);
+    if (!writeRoles.has(membership.role)) {
+      return NextResponse.json(
+        { error: "Acesso negado: permissão insuficiente para importar" },
+        { status: 403 },
+      );
+    }
+
+    // ── 5. Authorization: account must belong to the family ───────────
+    const { data: account } = await serviceClient
+      .from("accounts")
+      .select("id, family_id, is_reconcilable, reconciled_until, visibility, owner_user_id")
+      .eq("id", accountId)
+      .single();
+
+    if (!account || account.family_id !== familyId) {
+      return NextResponse.json(
+        { error: "Conta não encontrada nesta família" },
+        { status: 403 },
+      );
+    }
+
+    // Private accounts: only owner can import
+    if (account.visibility === "private" && account.owner_user_id !== user.id) {
+      return NextResponse.json(
+        { error: "Acesso negado: conta privada" },
+        { status: 403 },
+      );
+    }
+
+    // ── 6. Idempotency: check existing import batch by hash ──────────
+    const { data: existingBatch } = await serviceClient
       .from("import_batches")
       .select("id")
       .eq("family_id", familyId)
@@ -74,35 +126,30 @@ export async function POST(request: NextRequest) {
     if (existingBatch) {
       return NextResponse.json(
         { error: "Este arquivo já foi importado anteriormente" },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    // Check overlap requirement for reconcilable accounts
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("is_reconcilable, reconciled_until")
-      .eq("id", accountId)
-      .single();
-
-    if (account?.is_reconcilable && account.reconciled_until && startDate) {
-      // New OFX must start on or before reconciled_until (overlap required)
+    // ── 7. Overlap check for reconcilable accounts ────────────────────
+    if (account.is_reconcilable && account.reconciled_until && startDate) {
       if (startDate > account.reconciled_until) {
         const gap = Math.ceil(
-          (new Date(startDate).getTime() - new Date(account.reconciled_until).getTime()) / 86400000
+          (new Date(startDate).getTime() -
+            new Date(account.reconciled_until).getTime()) /
+            86400000,
         );
         return NextResponse.json(
           {
             error: `Gap de ${gap} dia(s) detectado. O extrato deve começar em ${account.reconciled_until} ou antes para garantir sobreposição.`,
-            code: "GAP_DETECTED"
+            code: "GAP_DETECTED",
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    // Create import batch
-    const { data: batch, error: batchError } = await supabase
+    // ── 8. Create import batch ────────────────────────────────────────
+    const { data: batch, error: batchError } = await serviceClient
       .from("import_batches")
       .insert({
         family_id: familyId,
@@ -122,29 +169,31 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (batchError) {
-      console.error("Error creating import batch:", batchError);
+      console.error("import-confirm: batch creation failed:", batchError.message);
       return NextResponse.json(
         { error: "Erro ao criar lote de importação" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    // Check for duplicate transactions by external_id (FITID)
+    // ── 9. Deduplicate by external_id (FITID) ────────────────────────
     const fitIds = transactions.map((tx) => tx.fitId);
-    const { data: existingTransactions } = await supabase
+    const { data: existingTransactions } = await serviceClient
       .from("transactions")
       .select("external_id")
       .eq("account_id", accountId)
       .in("external_id", fitIds);
 
-    const existingFitIds = new Set(existingTransactions?.map((t) => t.external_id) ?? []);
+    const existingFitIds = new Set(
+      existingTransactions?.map((t) => t.external_id) ?? [],
+    );
 
-    // Filter out duplicates
-    const newTransactions = transactions.filter((tx) => !existingFitIds.has(tx.fitId));
+    const newTransactions = transactions.filter(
+      (tx) => !existingFitIds.has(tx.fitId),
+    );
 
     if (newTransactions.length === 0) {
-      // Update batch status to processed with 0 transactions
-      await supabase
+      await serviceClient
         .from("import_batches")
         .update({
           status: "processed",
@@ -165,10 +214,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Count transactions with client-side categories
+    // ── 10. Insert transactions ───────────────────────────────────────
     let autoCategorized = 0;
 
-    // Insert transactions
     const transactionsToInsert = newTransactions.map((tx) => {
       const hasCategoryFromClient = tx.category_id != null;
       if (hasCategoryFromClient) autoCategorized++;
@@ -188,36 +236,33 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    const { data: insertedRows, error: insertError } = await supabase
+    const { data: insertedRows, error: insertError } = await serviceClient
       .from("transactions")
       .insert(transactionsToInsert)
       .select("id, category_id, original_description, amount");
 
     if (insertError) {
-      console.error("Error inserting transactions:", insertError);
-      // Update batch status to failed
-      await supabase
+      console.error("import-confirm: transaction insert failed:", insertError.message);
+      await serviceClient
         .from("import_batches")
         .update({
           status: "failed",
-          metadata: {
-            error: insertError.message,
-          },
+          metadata: { error: insertError.message },
         })
         .eq("id", batch.id);
 
       return NextResponse.json(
         { error: "Erro ao inserir transações" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    // Server-side fallback: apply rules to uncategorized transactions
-    const uncategorizedRows = (insertedRows ?? []).filter((row) => !row.category_id);
-    if (uncategorizedRows.length > 0) {
-      // Create a service_role client for reading rules (bypasses RLS)
-      const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+    // ── 11. Server-side rule application (uncategorized) ──────────────
+    const uncategorizedRows = (insertedRows ?? []).filter(
+      (row) => !row.category_id,
+    );
 
+    if (uncategorizedRows.length > 0) {
       const { data: rules } = await serviceClient
         .from("rules")
         .select("id, match, action, priority, created_at")
@@ -242,14 +287,21 @@ export async function POST(request: NextRequest) {
             const absAmount = Math.abs(tx.amount);
 
             if (match.description_contains) {
-              if (!desc.includes(String(match.description_contains).toLowerCase())) {
+              if (
+                !desc.includes(
+                  String(match.description_contains).toLowerCase(),
+                )
+              ) {
                 matched = false;
               }
             }
 
             if (matched && match.description_regex) {
               try {
-                const regex = new RegExp(String(match.description_regex), "i");
+                const regex = new RegExp(
+                  String(match.description_regex),
+                  "i",
+                );
                 if (!regex.test(tx.original_description ?? "")) {
                   matched = false;
                 }
@@ -259,7 +311,10 @@ export async function POST(request: NextRequest) {
             }
 
             if (matched && match.amount_exact != null) {
-              if (Math.abs(absAmount - Math.abs(Number(match.amount_exact))) > 0.009) {
+              if (
+                Math.abs(absAmount - Math.abs(Number(match.amount_exact))) >
+                0.009
+              ) {
                 matched = false;
               }
             }
@@ -300,8 +355,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update batch status to processed
-    await supabase
+    // ── 12. Update batch status ───────────────────────────────────────
+    await serviceClient
       .from("import_batches")
       .update({
         status: "processed",
@@ -317,7 +372,7 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", batch.id);
 
-    // Update account reconciliation state (only advance, never retrocede)
+    // ── 13. Update account reconciliation state (only advance) ────────
     if (endDate) {
       const updateData: Record<string, unknown> = {
         reconciled_until: endDate,
@@ -326,8 +381,7 @@ export async function POST(request: NextRequest) {
         updateData.reconciled_balance = ledgerBalance;
       }
 
-      // Only update if the new endDate is after the current reconciled_until
-      const { data: currentAccount } = await supabase
+      const { data: currentAccount } = await serviceClient
         .from("accounts")
         .select("reconciled_until")
         .eq("id", accountId)
@@ -338,7 +392,7 @@ export async function POST(request: NextRequest) {
         endDate > currentAccount.reconciled_until;
 
       if (shouldUpdate) {
-        await supabase
+        await serviceClient
           .from("accounts")
           .update(updateData)
           .eq("id", accountId);
@@ -353,10 +407,13 @@ export async function POST(request: NextRequest) {
       batchId: batch.id,
     });
   } catch (error) {
-    console.error("Error confirming import:", error);
+    // Sanitized log: never include full payload or secrets
+    const message =
+      error instanceof Error ? error.message : "Unknown error";
+    console.error("import-confirm: unhandled error:", message);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro ao confirmar importação" },
-      { status: 500 }
+      { error: "Erro ao confirmar importação" },
+      { status: 500 },
     );
   }
 }

@@ -51,3 +51,4 @@ coverage/
 # Example data
 *.ofx
 !db/seed/ofx/*.ofx
+!apps/web/src/lib/__fixtures__/*.ofx

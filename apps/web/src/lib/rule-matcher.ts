@@ -1,4 +1,4 @@
-import type { Rule, RuleMatch, RuleAction } from "@/types";
+import type { Rule, RuleMatch } from "@/types";
 
 export type RuleMatchResult = {
   ruleId: string;

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useApp, type Category } from "@/contexts/AppContext";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { primaryButton, secondaryButton } from "@/constants/styles";
-import type { Rule, RuleMatch, RuleAction } from "@/types";
+import type { Rule, RuleAction, RuleMatch } from "@/types";
 
 const supabase = getSupabaseClient();
 
@@ -25,19 +25,30 @@ export function RuleModal({
 }: RuleModalProps) {
   const { session, activeFamilyId, categories } = useApp();
 
-  // Form state
-  const [name, setName] = useState("");
-  const [descContains, setDescContains] = useState("");
-  const [descRegex, setDescRegex] = useState("");
-  const [amountMode, setAmountMode] = useState<"none" | "range" | "exact">("none");
-  const [amountMin, setAmountMin] = useState("");
-  const [amountMax, setAmountMax] = useState("");
-  const [amountExact, setAmountExact] = useState("");
-  const [dayOfMonth, setDayOfMonth] = useState("");
-  const [dateAfter, setDateAfter] = useState("");
-  const [dateBefore, setDateBefore] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [setDescription, setSetDescription] = useState("");
+  // Form state — initialized from editingRule (component is remounted via key prop)
+  const initAmountMode = editingRule?.match.amount_exact != null
+    ? "exact" as const
+    : (editingRule?.match.amount_min != null || editingRule?.match.amount_max != null)
+      ? "range" as const
+      : "none" as const;
+  const [name, setName] = useState(editingRule?.name ?? "");
+  const [descContains, setDescContains] = useState(editingRule?.match.description_contains ?? "");
+  const [descRegex, setDescRegex] = useState(editingRule?.match.description_regex ?? "");
+  const [amountMode, setAmountMode] = useState<"none" | "range" | "exact">(initAmountMode);
+  const [amountMin, setAmountMin] = useState(
+    initAmountMode === "range" && editingRule?.match.amount_min != null ? String(editingRule.match.amount_min) : "",
+  );
+  const [amountMax, setAmountMax] = useState(
+    initAmountMode === "range" && editingRule?.match.amount_max != null ? String(editingRule.match.amount_max) : "",
+  );
+  const [amountExact, setAmountExact] = useState(
+    initAmountMode === "exact" && editingRule?.match.amount_exact != null ? String(editingRule.match.amount_exact) : "",
+  );
+  const [dayOfMonth, setDayOfMonth] = useState(editingRule?.match.day_of_month != null ? String(editingRule.match.day_of_month) : "");
+  const [dateAfter, setDateAfter] = useState(editingRule?.match.date_after ?? "");
+  const [dateBefore, setDateBefore] = useState(editingRule?.match.date_before ?? "");
+  const [categoryId, setCategoryId] = useState(editingRule?.action.set_category_id ?? "");
+  const [setDescription, setSetDescription] = useState(editingRule?.action.set_description ?? "");
 
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -60,57 +71,6 @@ export function RuleModal({
     }
     return cat.name;
   };
-
-  // Reset form when modal opens
-  const prevIsOpen = useRef(false);
-  useLayoutEffect(() => {
-    if (isOpen && !prevIsOpen.current) {
-      setError(null);
-
-      if (editingRule) {
-        setName(editingRule.name);
-        setDescContains(editingRule.match.description_contains ?? "");
-        setDescRegex(editingRule.match.description_regex ?? "");
-        setCategoryId(editingRule.action.set_category_id ?? "");
-        setSetDescription(editingRule.action.set_description ?? "");
-
-        setDayOfMonth(editingRule.match.day_of_month != null ? String(editingRule.match.day_of_month) : "");
-        setDateAfter(editingRule.match.date_after ?? "");
-        setDateBefore(editingRule.match.date_before ?? "");
-
-        if (editingRule.match.amount_exact != null) {
-          setAmountMode("exact");
-          setAmountExact(String(editingRule.match.amount_exact));
-          setAmountMin("");
-          setAmountMax("");
-        } else if (editingRule.match.amount_min != null || editingRule.match.amount_max != null) {
-          setAmountMode("range");
-          setAmountMin(editingRule.match.amount_min != null ? String(editingRule.match.amount_min) : "");
-          setAmountMax(editingRule.match.amount_max != null ? String(editingRule.match.amount_max) : "");
-          setAmountExact("");
-        } else {
-          setAmountMode("none");
-          setAmountMin("");
-          setAmountMax("");
-          setAmountExact("");
-        }
-      } else {
-        setName("");
-        setDescContains("");
-        setDescRegex("");
-        setAmountMode("none");
-        setAmountMin("");
-        setAmountMax("");
-        setAmountExact("");
-        setDayOfMonth("");
-        setDateAfter("");
-        setDateBefore("");
-        setCategoryId("");
-        setSetDescription("");
-      }
-    }
-    prevIsOpen.current = isOpen;
-  }, [isOpen, editingRule]);
 
   // Lock body scroll
   useEffect(() => {

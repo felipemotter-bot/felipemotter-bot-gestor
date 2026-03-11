@@ -44,7 +44,6 @@ type AccountReconciliationData = {
 
 export default function ReconciliacaoPage() {
   const {
-    session,
     activeFamilyId,
     accounts,
     categories,

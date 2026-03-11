@@ -65,6 +65,7 @@ export default function LancamentosPage() {
     categories,
     archivedCategories,
     dataRefreshCounter,
+    triggerRefresh,
     openTransactionModal,
   } = useApp();
 
@@ -82,6 +83,12 @@ export default function LancamentosPage() {
   const [filterEndDate, setFilterEndDate] = useState("");
   const [pageSize, setPageSize] = useState(50);
   const [limit, setLimit] = useState(50);
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchCategoryOpen, setIsBatchCategoryOpen] = useState(false);
+  const [batchCategorySearch, setBatchCategorySearch] = useState("");
+  const [isBatchUpdating, setIsBatchUpdating] = useState(false);
 
   // UI state
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
@@ -479,6 +486,80 @@ export default function LancamentosPage() {
     const catType = tx.category?.category_type as "expense" | "income" | "transfer" | undefined;
     openTransactionModal(catType, edit);
   };
+
+  // Selection helpers
+  const editableVisibleIds = useMemo(
+    () =>
+      visibleTransactions
+        .filter((tx) => tx.source !== "transfer" && tx.source !== "adjustment")
+        .map((tx) => tx.id),
+    [visibleTransactions],
+  );
+
+  const isAllSelected =
+    editableVisibleIds.length > 0 && editableVisibleIds.every((id) => effectiveSelectedIds.has(id));
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(editableVisibleIds));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setIsBatchCategoryOpen(false);
+    setBatchCategorySearch("");
+  };
+
+  // Prune selection to only visible transaction IDs
+  const effectiveSelectedIds = selectedIds;
+
+  // Batch update category
+  const batchUpdateCategory = async (categoryId: string) => {
+    const ids = Array.from(effectiveSelectedIds);
+    if (ids.length === 0) return;
+
+    setIsBatchUpdating(true);
+    const { error } = await supabase
+      .from("transactions")
+      .update({ category_id: categoryId, auto_categorized: false })
+      .in("id", ids);
+
+    if (error) {
+      console.error("Batch update error:", error);
+    } else {
+      clearSelection();
+      triggerRefresh();
+    }
+    setIsBatchUpdating(false);
+  };
+
+  // Batch category options
+  const batchCategoryOptions = useMemo(() => {
+    const opts = categories
+      .filter((c) => c.category_type !== "transfer" && c.name !== "Ajuste de saldo")
+      .map((c) => ({
+        id: c.id,
+        label: getCategoryDisplayLabel(c.id, c.name),
+        type: c.category_type,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+
+    if (!batchCategorySearch.trim()) return opts;
+    const q = batchCategorySearch.trim().toLowerCase();
+    return opts.filter((o) => o.label.toLowerCase().includes(q));
+  }, [categories, batchCategorySearch, getCategoryDisplayLabel]);
 
   // Calendar functions
   const openCalendar = (target: "start" | "end") => {
@@ -1056,15 +1137,28 @@ export default function LancamentosPage() {
                         const canEdit = !isManualTransfer && !isAdjustRow;
 
                         return (
-                          <button
+                          <div
                             key={tx.id}
-                            type="button"
-                            disabled={!canEdit}
-                            onClick={() => canEdit && openEditModal(tx)}
-                            className={`flex w-full items-start gap-3 rounded-2xl border border-[var(--border)] bg-white px-3 py-2 text-left shadow-sm transition ${
+                            className={`flex w-full items-start gap-2 rounded-2xl border border-[var(--border)] bg-white px-3 py-2 text-left shadow-sm transition ${
                               canEdit ? "cursor-pointer hover:border-[var(--accent)] hover:shadow-md" : ""
-                            }`}
+                            } ${effectiveSelectedIds.has(tx.id) ? "border-[var(--accent)] bg-blue-50" : ""}`}
                           >
+                            {canEdit && (
+                              <div className="flex shrink-0 items-center pt-3">
+                                <input
+                                  type="checkbox"
+                                  checked={effectiveSelectedIds.has(tx.id)}
+                                  onChange={() => toggleSelection(tx.id)}
+                                  className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-[var(--accent)]"
+                                />
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={() => canEdit && openEditModal(tx)}
+                              className="flex flex-1 items-start gap-3"
+                            >
                             <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${iconTone}`}>
                               {isTransferRow ? (
                                 <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1105,6 +1199,7 @@ export default function LancamentosPage() {
                               </p>
                             </div>
                           </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -1119,6 +1214,15 @@ export default function LancamentosPage() {
             <table className="w-full text-sm">
               <thead className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
                 <tr className="border-b border-[var(--border)]">
+                  <th className="w-8 py-2">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-[var(--accent)]"
+                      title="Selecionar todos"
+                    />
+                  </th>
                   <th className="py-2 text-left font-semibold">Data</th>
                   <th className="py-2 text-left font-semibold">Categoria</th>
                   <th className="py-2 text-left font-semibold">Tipo</th>
@@ -1129,13 +1233,13 @@ export default function LancamentosPage() {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="py-4 text-sm text-[var(--muted)]">
+                    <td colSpan={6} className="py-4 text-sm text-[var(--muted)]">
                       Carregando lançamentos...
                     </td>
                   </tr>
                 ) : visibleTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-4 text-sm text-[var(--muted)]">
+                    <td colSpan={6} className="py-4 text-sm text-[var(--muted)]">
                       Nenhum lançamento encontrado.
                     </td>
                   </tr>
@@ -1173,8 +1277,18 @@ export default function LancamentosPage() {
                         onClick={() => canEdit && openEditModal(tx)}
                         className={`border-b border-[var(--border)] last:border-b-0 ${
                           canEdit ? "cursor-pointer transition hover:bg-slate-50" : ""
-                        }`}
+                        } ${effectiveSelectedIds.has(tx.id) ? "bg-blue-50" : ""}`}
                       >
+                        <td className="w-8 py-3" onClick={(e) => e.stopPropagation()}>
+                          {canEdit && (
+                            <input
+                              type="checkbox"
+                              checked={effectiveSelectedIds.has(tx.id)}
+                              onChange={() => toggleSelection(tx.id)}
+                              className="h-4 w-4 cursor-pointer rounded border-gray-300 accent-[var(--accent)]"
+                            />
+                          )}
+                        </td>
                         <td className="py-3 text-sm text-[var(--muted)]">
                           <div>{formatDate(tx.posted_at)}</div>
                           {tx.description && (
@@ -1233,6 +1347,67 @@ export default function LancamentosPage() {
             </div>
           )}
         </section>
+
+        {/* Batch action bar */}
+        {effectiveSelectedIds.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-5 py-3 shadow-lg">
+            <span className="text-sm font-semibold text-[var(--ink)]">
+              {effectiveSelectedIds.size} selecionado{effectiveSelectedIds.size > 1 ? "s" : ""}
+            </span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsBatchCategoryOpen(!isBatchCategoryOpen)}
+                disabled={isBatchUpdating}
+                className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                {isBatchUpdating ? "Salvando..." : "Definir categoria"}
+              </button>
+              {isBatchCategoryOpen && (
+                <div className="absolute bottom-full left-0 mb-2 w-72 overflow-hidden rounded-xl border border-[var(--border)] bg-white shadow-lg">
+                  <div className="border-b border-[var(--border)] px-3 py-2">
+                    <input
+                      type="text"
+                      placeholder="Buscar categoria..."
+                      value={batchCategorySearch}
+                      onChange={(e) => setBatchCategorySearch(e.target.value)}
+                      className="w-full rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {batchCategoryOptions.length === 0 ? (
+                      <p className="px-3 py-2 text-sm text-[var(--muted)]">Nenhuma categoria encontrada</p>
+                    ) : (
+                      batchCategoryOptions.map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => batchUpdateCategory(opt.id)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-50"
+                        >
+                          <span
+                            className={`inline-block h-2 w-2 rounded-full ${
+                              opt.type === "income" ? "bg-emerald-400" : "bg-rose-400"
+                            }`}
+                          />
+                          {opt.label}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50"
+            >
+              Limpar
+            </button>
+          </div>
+        )}
 
         {/* Calendar Modal */}
         {isCalendarOpen && (

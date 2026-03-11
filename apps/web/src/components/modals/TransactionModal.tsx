@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useApp, type Category } from "@/contexts/AppContext";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { primaryButton } from "@/constants/styles";
@@ -103,6 +103,12 @@ export function TransactionModal() {
     return parts ? parts.year : new Date().getFullYear();
   });
 
+  // Category search state
+  const [categorySearch, setCategorySearch] = useState("");
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const categoryDropdownRef = useRef<HTMLDivElement>(null);
+  const categoryInputRef = useRef<HTMLInputElement>(null);
+
   // Reconciliation hint state
   const [showHint, setShowHint] = useState(false);
   const [hintDescription, setHintDescription] = useState("");
@@ -180,6 +186,8 @@ export function TransactionModal() {
         setSelectedCandidateId("");
         setIsUnlinking(false);
         setTransactionCategoryId("");
+        setCategorySearch("");
+        setIsCategoryDropdownOpen(false);
         setTransactionAmount("");
         setTransactionDescription("");
         setTransactionTime("");
@@ -356,8 +364,46 @@ export function TransactionModal() {
   const categorySelectDisabled =
     !transactionType || isTransfer || !hasCategoryOptions;
   const categoryPlaceholder = transactionType
-    ? `Categoria de ${activeTypeLabel.toLowerCase()}`
+    ? `Buscar categoria de ${activeTypeLabel.toLowerCase()}...`
     : "Selecione o tipo primeiro";
+
+  const filteredCategoryOptions = categorySearch
+    ? transactionCategoryOptions.filter((c) =>
+        c.label.toLowerCase().includes(categorySearch.toLowerCase()),
+      )
+    : transactionCategoryOptions;
+
+  const selectedCategoryLabel = transactionCategoryId
+    ? transactionCategoryOptions.find((c) => c.id === transactionCategoryId)
+        ?.label ?? ""
+    : "";
+
+  const handleCategorySelect = useCallback(
+    (id: string) => {
+      setTransactionCategoryId(id);
+      setCategorySearch("");
+      setIsCategoryDropdownOpen(false);
+    },
+    [setTransactionCategoryId],
+  );
+
+  // Close category dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        categoryDropdownRef.current &&
+        !categoryDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsCategoryDropdownOpen(false);
+        setCategorySearch("");
+      }
+    };
+    if (isCategoryDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isCategoryDropdownOpen]);
 
   // Check if editing account is reconcilable (for hint section)
   const editAccountIsReconcilable = isEditing && editTx?.account_id
@@ -967,7 +1013,7 @@ export function TransactionModal() {
                     <label className="text-xs font-semibold text-[var(--muted)]">
                       Categoria
                     </label>
-                    <div className="relative">
+                    <div className="relative" ref={categoryDropdownRef}>
                       <svg
                         aria-hidden="true"
                         viewBox="0 0 24 24"
@@ -979,21 +1025,73 @@ export function TransactionModal() {
                         <path d="M7 7h7l5 5-7 7-5-5V7z" />
                         <circle cx="10" cy="10" r="1.2" />
                       </svg>
-                      <select
-                        value={transactionCategoryId}
-                        onChange={(event) =>
-                          setTransactionCategoryId(event.target.value)
+                      <input
+                        ref={categoryInputRef}
+                        type="text"
+                        value={
+                          isCategoryDropdownOpen
+                            ? categorySearch
+                            : selectedCategoryLabel
                         }
+                        onChange={(e) => {
+                          setCategorySearch(e.target.value);
+                          if (!isCategoryDropdownOpen)
+                            setIsCategoryDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          if (!categorySelectDisabled) {
+                            setIsCategoryDropdownOpen(true);
+                            setCategorySearch("");
+                          }
+                        }}
+                        placeholder={categoryPlaceholder}
                         disabled={categorySelectDisabled}
+                        autoComplete="off"
                         className="w-full rounded-xl border border-[var(--border)] bg-white px-10 py-3 text-sm text-[var(--ink)] shadow-sm outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--ring)] disabled:cursor-not-allowed disabled:bg-slate-50"
-                      >
-                        <option value="">{categoryPlaceholder}</option>
-                        {transactionCategoryOptions.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                      {transactionCategoryId && !isCategoryDropdownOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTransactionCategoryId("");
+                            setCategorySearch("");
+                            categoryInputRef.current?.focus();
+                          }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:text-[var(--ink)]"
+                        >
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      ) : null}
+                      {isCategoryDropdownOpen &&
+                        !categorySelectDisabled ? (
+                        <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-[var(--border)] bg-white py-1 shadow-lg">
+                          {filteredCategoryOptions.length === 0 ? (
+                            <li className="px-4 py-2 text-xs text-[var(--muted)]">
+                              Nenhuma categoria encontrada
+                            </li>
+                          ) : (
+                            filteredCategoryOptions.map((category) => (
+                              <li key={category.id}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCategorySelect(category.id)
+                                  }
+                                  className={`w-full px-4 py-2 text-left text-sm hover:bg-slate-50 ${
+                                    category.id === transactionCategoryId
+                                      ? "bg-[var(--accent)]/5 font-medium text-[var(--accent)]"
+                                      : "text-[var(--ink)]"
+                                  }`}
+                                >
+                                  {category.label}
+                                </button>
+                              </li>
+                            ))
+                          )}
+                        </ul>
+                      ) : null}
                     </div>
                     {transactionType && !hasCategoryOptions ? (
                       <p className="text-xs text-amber-600">

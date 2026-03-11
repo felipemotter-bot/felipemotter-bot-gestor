@@ -7,6 +7,7 @@ import { useApp, type Category, type EditTransaction } from "@/contexts/AppConte
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { currencyFormatter, shortDateFormatter, longDateFormatter } from "@/lib/formatters";
 import { getDateParts, formatDateKey, parseDateValue, getMonthRange, calendarWeekdays } from "@/lib/date-utils";
+import { buildTransactionSearchFilter } from "@/lib/search-utils";
 import { typeFilterAll } from "@/types";
 
 const supabase = getSupabaseClient();
@@ -191,9 +192,9 @@ export default function LancamentosPage() {
         query = query.in("category_id", filterCategoryIds);
       }
 
-      if (debouncedSearch) {
-        const pattern = `%${debouncedSearch}%`;
-        query = query.or(`description.ilike.${pattern},original_description.ilike.${pattern}`);
+      const searchFilter = buildTransactionSearchFilter(debouncedSearch);
+      if (searchFilter) {
+        query = query.or(searchFilter);
       }
 
       if (effectiveStartDate) {

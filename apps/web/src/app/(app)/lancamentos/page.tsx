@@ -75,6 +75,7 @@ export default function LancamentosPage() {
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
   const [typeFilters, setTypeFilters] = useState<string[]>([...typeFilterAll]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterUncategorized, setFilterUncategorized] = useState(initialUncategorized);
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
@@ -143,6 +144,14 @@ export default function LancamentosPage() {
   // Month range
   const monthRange = useMemo(() => getMonthRange(activeMonth), [activeMonth]);
 
+  // Debounce search query for server-side filtering
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim().toLowerCase());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   // Effective date range — when uncategorized filter is active without explicit dates, show all periods
   const effectiveStartDate = filterStartDate || (filterUncategorized ? "" : monthRange.startDate);
   const effectiveEndDate = filterEndDate || (filterUncategorized ? "" : monthRange.endDate);
@@ -180,6 +189,11 @@ export default function LancamentosPage() {
         query = query.is("category_id", null);
       } else if (filterCategoryIds.length > 0) {
         query = query.in("category_id", filterCategoryIds);
+      }
+
+      if (debouncedSearch) {
+        const pattern = `%${debouncedSearch}%`;
+        query = query.or(`description.ilike.${pattern},original_description.ilike.${pattern}`);
       }
 
       if (effectiveStartDate) {
@@ -231,6 +245,7 @@ export default function LancamentosPage() {
     filterUncategorized,
     effectiveStartDate,
     effectiveEndDate,
+    debouncedSearch,
     dataRefreshCounter,
   ]);
 
@@ -238,7 +253,7 @@ export default function LancamentosPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync limit with filters
     setLimit(pageSize);
-  }, [pageSize, filterAccountIds, filterCategoryIds, filterUncategorized, filterStartDate, filterEndDate, activeMonth]);
+  }, [pageSize, filterAccountIds, filterCategoryIds, filterUncategorized, filterStartDate, filterEndDate, activeMonth, debouncedSearch]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -283,29 +298,8 @@ export default function LancamentosPage() {
     });
   }, [transactions, typeFilters]);
 
-  // Search filtered transactions
-  const visibleTransactions = useMemo(() => {
-    const normalized = searchQuery.trim().toLowerCase();
-    if (!normalized) return typeFilteredTransactions;
-    return typeFilteredTransactions.filter((tx) => {
-      const categoryLabel = tx.category?.id
-        ? getCategoryDisplayLabel(tx.category.id, tx.category?.name)
-        : tx.category?.name;
-      const haystack = [
-        tx.description,
-        tx.original_description,
-        categoryLabel,
-        tx.account?.name,
-        tx.amount,
-        tx.posted_at,
-        tx.source,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(normalized);
-    });
-  }, [typeFilteredTransactions, searchQuery, getCategoryDisplayLabel]);
+  // Visible transactions (search is now server-side)
+  const visibleTransactions = typeFilteredTransactions;
 
   // Filter state
   const isTypeFilterActive = typeFilters.length !== typeFilterAll.length;
@@ -331,8 +325,8 @@ export default function LancamentosPage() {
     isTypeFilterActive ? 1 : 0,
     isCustomDateRange ? 1 : 0,
   ].reduce((total, v) => total + v, 0);
-  const showPagination = !searchQuery.trim();
-  const showLocalFilter = searchQuery.trim() || isTypeFilterActive;
+  const showPagination = true;
+  const showLocalFilter = isTypeFilterActive;
 
   // Filter chips
   const activeFilterChips = useMemo(() => {

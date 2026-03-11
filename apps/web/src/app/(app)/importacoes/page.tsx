@@ -160,7 +160,7 @@ export default function ImportacoesPage() {
       setParsedData(result.data);
       setCategoryOverrides(new Map());
       setStep("preview");
-    } catch (err) {
+    } catch {
       setError("Erro ao enviar arquivo");
     } finally {
       setIsLoading(false);
@@ -284,7 +284,7 @@ export default function ImportacoesPage() {
       });
       setStep("done");
       triggerRefresh();
-    } catch (err) {
+    } catch {
       setError("Erro ao confirmar importação");
       setStep("preview");
     }

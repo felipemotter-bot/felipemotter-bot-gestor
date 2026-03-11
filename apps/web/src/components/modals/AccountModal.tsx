@@ -51,7 +51,6 @@ export function AccountModal({
   useLayoutEffect(() => {
     // Only reset when transitioning from closed to open
     if (isOpen && !prevIsOpen.current) {
-      /* eslint-disable react-hooks/set-state-in-effect -- Intentional: reset form when modal opens */
       setAccountError(null);
       setBankLogoSearch("");
 
@@ -84,7 +83,6 @@ export function AccountModal({
         setOfxAccountId("");
         setPendingOfxData(null);
       }
-      /* eslint-enable react-hooks/set-state-in-effect */
     }
     prevIsOpen.current = isOpen;
   }, [isOpen, editingAccount]);

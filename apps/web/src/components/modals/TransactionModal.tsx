@@ -143,7 +143,6 @@ export function TransactionModal() {
   useLayoutEffect(() => {
     if (transactionModal.isOpen && !prevIsOpen.current) {
       const today = getBrazilToday();
-      /* eslint-disable react-hooks/set-state-in-effect -- Intentional: reset form when modal opens */
       if (editTx) {
         // Edit mode: pre-fill from existing transaction
         const cat = editTx.category_id ? categoriesById[editTx.category_id] : null;
@@ -208,7 +207,6 @@ export function TransactionModal() {
         setHintAmountMax("");
         setShowHint(false);
       }
-      /* eslint-enable react-hooks/set-state-in-effect */
     }
     prevIsOpen.current = transactionModal.isOpen;
   }, [transactionModal.isOpen, transactionModal.initialType, editTx, categoriesById]);

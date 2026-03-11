@@ -85,21 +85,19 @@ export default function ContasPage() {
     const reconcilable = accounts.filter(
       (a) => a.is_reconcilable && a.reconciled_balance != null && a.reconciled_until,
     );
-    if (reconcilable.length === 0) {
-      setDiscrepancies({});
-      return;
-    }
     let cancelled = false;
-    Promise.all(reconcilable.map((a) => checkAccountDiscrepancy(a))).then(
-      (results) => {
-        if (cancelled) return;
-        const next: Record<string, BalanceDiscrepancy> = {};
-        for (const disc of results) {
-          if (disc) next[disc.accountId] = disc;
-        }
-        setDiscrepancies(next);
-      },
-    );
+    const work =
+      reconcilable.length > 0
+        ? Promise.all(reconcilable.map((a) => checkAccountDiscrepancy(a)))
+        : Promise.resolve([] as (BalanceDiscrepancy | null)[]);
+    work.then((results) => {
+      if (cancelled) return;
+      const next: Record<string, BalanceDiscrepancy> = {};
+      for (const disc of results) {
+        if (disc) next[disc.accountId] = disc;
+      }
+      setDiscrepancies(next);
+    });
     return () => {
       cancelled = true;
     };

@@ -58,10 +58,23 @@ export default function RegrasPage() {
   }, [activeFamilyId]);
 
   useEffect(() => {
-    if (activeFamilyId && session?.access_token) {
-      loadRules();
-    }
-  }, [activeFamilyId, session?.access_token, loadRules]);
+    if (!activeFamilyId || !session?.access_token) return;
+    let cancelled = false;
+    supabase
+      .from("rules")
+      .select("*")
+      .eq("family_id", activeFamilyId)
+      .order("priority", { ascending: true })
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        setRules(error ? [] : (data ?? []));
+        setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFamilyId, session?.access_token]);
 
   // Handlers
   const openModal = (rule?: Rule) => {
@@ -457,13 +470,16 @@ export default function RegrasPage() {
         </section>
       </main>
 
-      <RuleModal
-        isOpen={isModalOpen}
-        onClose={closeModal}
-        editingRule={editingRule}
-        nextPriority={nextPriority}
-        onSaved={loadRules}
-      />
+      {isModalOpen && (
+        <RuleModal
+          key={editingRule?.id ?? "new"}
+          isOpen={isModalOpen}
+          onClose={closeModal}
+          editingRule={editingRule}
+          nextPriority={nextPriority}
+          onSaved={loadRules}
+        />
+      )}
     </>
   );
 }

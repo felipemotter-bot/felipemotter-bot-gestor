@@ -37,6 +37,7 @@ const supabase = getSupabaseClient();
 type Transaction = {
   id: string;
   amount: string;
+  personal_amount: string | null;
   description: string | null;
   posted_at: string;
   source: string | null;
@@ -84,7 +85,7 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from("transactions")
         .select(
-          "id, amount, description, posted_at, source, account:accounts(id, name), category:categories(id, name, category_type)",
+          "id, amount, personal_amount, description, posted_at, source, account:accounts(id, name), category:categories(id, name, category_type)",
         )
         .in("account_id", accounts.map((a) => a.id))
         .gte("posted_at", monthRange.startDate)
@@ -106,6 +107,7 @@ export default function DashboardPage() {
           return {
             id: item.id,
             amount: item.amount,
+            personal_amount: (item as Record<string, unknown>).personal_amount as string | null,
             description: item.description,
             posted_at: item.posted_at,
             source: item.source,
@@ -134,7 +136,7 @@ export default function DashboardPage() {
     const loadSummary = async () => {
       const { data, error } = await supabase
         .from("transactions")
-        .select("amount, source")
+        .select("amount, personal_amount, source")
         .in("account_id", accounts.map((a) => a.id))
         .gte("posted_at", monthRange.startDate)
         .lte("posted_at", monthRange.endDate);
@@ -148,15 +150,15 @@ export default function DashboardPage() {
       let expense = 0;
 
       (data ?? []).forEach((item) => {
-        const amountValue = Number(item.amount);
-        if (!Number.isFinite(amountValue)) return;
-
         if (item.source === "transfer") return;
 
-        if (amountValue > 0) {
-          income += amountValue;
-        } else if (amountValue < 0) {
-          expense += Math.abs(amountValue);
+        const effectiveAmount = item.personal_amount != null ? Number(item.personal_amount) : Number(item.amount);
+        if (!Number.isFinite(effectiveAmount)) return;
+
+        if (effectiveAmount > 0) {
+          income += effectiveAmount;
+        } else if (effectiveAmount < 0) {
+          expense += Math.abs(effectiveAmount);
         }
       });
 
@@ -221,7 +223,7 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from("transactions")
         .select(
-          "amount, source, posted_at, category:categories(id, name, category_type, parent_id, icon_bg, icon_color)",
+          "amount, personal_amount, source, posted_at, category:categories(id, name, category_type, parent_id, icon_bg, icon_color)",
         )
         .in("account_id", accounts.map((a) => a.id))
         .gte("posted_at", monthRange.startDate)
@@ -279,8 +281,8 @@ export default function DashboardPage() {
       };
 
       (data ?? []).forEach((row) => {
-        const amountValue = Number(row.amount);
-        if (!Number.isFinite(amountValue)) return;
+        const rawAmount = Number(row.amount);
+        if (!Number.isFinite(rawAmount)) return;
 
         const postedAt = typeof row.posted_at === "string" ? row.posted_at : "";
         const dayKey = postedAt
@@ -291,9 +293,15 @@ export default function DashboardPage() {
 
         if (row.source === "transfer") return;
         if (row.source === "adjustment") {
-          addDaily(dayKey, amountValue);
+          addDaily(dayKey, rawAmount);
           return;
         }
+
+        const effectiveAmount = row.personal_amount != null ? Number(row.personal_amount) : rawAmount;
+        if (!Number.isFinite(effectiveAmount)) return;
+
+        // personal_amount = 0 means fully ignored from totals
+        if (effectiveAmount === 0 && row.personal_amount != null) return;
 
         const category = row.category as unknown as {
           id: string;
@@ -317,18 +325,18 @@ export default function DashboardPage() {
             id: category.id,
             label,
             color,
-            value: (incomeMap.get(category.id)?.value ?? 0) + Math.abs(amountValue),
+            value: (incomeMap.get(category.id)?.value ?? 0) + Math.abs(effectiveAmount),
           });
         } else if (category.category_type === "expense") {
           expenseMap.set(category.id, {
             id: category.id,
             label,
             color,
-            value: (expenseMap.get(category.id)?.value ?? 0) + Math.abs(amountValue),
+            value: (expenseMap.get(category.id)?.value ?? 0) + Math.abs(effectiveAmount),
           });
         }
 
-        addDaily(dayKey, amountValue);
+        addDaily(dayKey, effectiveAmount);
       });
 
       const expenseSegments = buildDonutSegments(Array.from(expenseMap.values()));

@@ -218,6 +218,7 @@ create table if not exists public.transactions (
   original_description text,
   auto_categorized boolean not null default false,
   reconciliation_hint jsonb,
+  personal_amount numeric(14,2),
   transfer_linked_id uuid references public.transactions(id) on delete set null,
   import_batch_id uuid references public.import_batches(id),
   created_by uuid references auth.users(id) default auth.uid(),

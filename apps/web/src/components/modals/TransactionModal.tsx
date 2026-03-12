@@ -127,6 +127,10 @@ export function TransactionModal() {
   const [isSearchingCandidates, setIsSearchingCandidates] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
 
+  // Personal amount state
+  const [personalAmountEnabled, setPersonalAmountEnabled] = useState(false);
+  const [personalAmountValue, setPersonalAmountValue] = useState("");
+
   // Error and loading state
   const [transactionError, setTransactionError] = useState<string | null>(null);
   const [isCreatingTransaction, setIsCreatingTransaction] = useState(false);
@@ -202,6 +206,19 @@ export function TransactionModal() {
       }
       setTransactionError(null);
       setIsCalendarOpen(false);
+      // Reset personal amount fields
+      if (editTx) {
+        if (editTx.personal_amount != null) {
+          setPersonalAmountEnabled(true);
+          setPersonalAmountValue(String(Math.abs(Number(editTx.personal_amount))));
+        } else {
+          setPersonalAmountEnabled(false);
+          setPersonalAmountValue("");
+        }
+      } else {
+        setPersonalAmountEnabled(false);
+        setPersonalAmountValue("");
+      }
       // Reset hint fields
       if (editTx) {
         const hint = (editTx as { reconciliation_hint?: { match_description?: string; match_amount_min?: number; match_amount_max?: number } | null }).reconciliation_hint;
@@ -695,6 +712,18 @@ export function TransactionModal() {
         }
         if (showHintSection) {
           updatePayload.reconciliation_hint = reconciliationHint;
+        }
+
+        // Personal amount
+        if (personalAmountEnabled) {
+          const paValue = Number(personalAmountValue);
+          if (Number.isFinite(paValue)) {
+            // Apply same sign as the transaction amount
+            const currentAmt = updatePayload.amount != null ? Number(updatePayload.amount) : Number(editTx.amount);
+            updatePayload.personal_amount = currentAmt < 0 ? -paValue : paValue;
+          }
+        } else {
+          updatePayload.personal_amount = null;
         }
 
         const { error } = await supabase
@@ -1340,6 +1369,57 @@ export function TransactionModal() {
                   </p>
                 )}
               </div>
+
+              {/* Personal amount (valor nos totais) */}
+              {isEditing && transactionType !== "transfer" && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setPersonalAmountEnabled(!personalAmountEnabled)}
+                    className="flex items-center gap-2 text-xs font-semibold text-[var(--muted)] transition hover:text-[var(--ink)]"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className={`h-3.5 w-3.5 transition ${personalAmountEnabled ? "rotate-90" : ""}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
+                    Valor nos totais
+                    {personalAmountEnabled && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700">
+                        Personalizado
+                      </span>
+                    )}
+                  </button>
+                  {personalAmountEnabled && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-semibold text-[var(--muted)]">Valor pessoal</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={personalAmountValue}
+                          onChange={(e) => setPersonalAmountValue(e.target.value)}
+                          placeholder="0.00"
+                          className="w-32 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+                        />
+                      </div>
+                      <div className="flex gap-1.5 pt-4">
+                        <button type="button" onClick={() => setPersonalAmountValue("0")} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:bg-slate-50">Ignorar</button>
+                        <button type="button" onClick={() => { const half = Math.abs(Number(editTx?.amount ?? 0)) / 2; setPersonalAmountValue(half.toFixed(2)); }} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:bg-slate-50">50%</button>
+                        <button type="button" onClick={() => { setPersonalAmountEnabled(false); setPersonalAmountValue(""); }} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:bg-slate-50">Original</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Reconciliation hint (manual transactions in reconcilable accounts) */}
               {showHintSection ? (

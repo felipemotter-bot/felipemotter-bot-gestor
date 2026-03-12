@@ -64,6 +64,7 @@ export type EditTransaction = {
   source: string | null;
   external_id: string | null;
   transfer_linked_id?: string | null;
+  personal_amount?: string | null;
 };
 
 type TransactionModalState = {

@@ -52,6 +52,7 @@ type TransactionRow = {
   external_id: string | null;
   auto_categorized: boolean;
   transfer_linked_id: string | null;
+  personal_amount: string | null;
   account: { id: string; name: string } | null;
   category: { id: string; name: string; category_type: string } | null;
 };
@@ -186,7 +187,7 @@ export default function LancamentosPage() {
       let query = supabase
         .from("transactions")
         .select(
-          "id, amount, description, original_description, posted_at, created_at, source, external_id, auto_categorized, transfer_linked_id, account:accounts(id, name), category:categories(id, name, category_type)",
+          "id, amount, personal_amount, description, original_description, posted_at, created_at, source, external_id, auto_categorized, transfer_linked_id, account:accounts(id, name), category:categories(id, name, category_type)",
           { count: "exact" },
         )
         .in("account_id", effectiveAccountIds)
@@ -234,6 +235,7 @@ export default function LancamentosPage() {
         external_id: item.external_id,
         auto_categorized: (item as Record<string, unknown>).auto_categorized === true,
         transfer_linked_id: (item as Record<string, unknown>).transfer_linked_id as string | null,
+        personal_amount: (item as Record<string, unknown>).personal_amount as string | null,
         account: item.account as unknown as { id: string; name: string } | null,
         category: item.category as unknown as { id: string; name: string; category_type: string } | null,
       }));
@@ -483,6 +485,7 @@ export default function LancamentosPage() {
       source: tx.source,
       external_id: tx.external_id,
       transfer_linked_id: tx.transfer_linked_id,
+      personal_amount: tx.personal_amount,
     };
     const catType = tx.category?.category_type as "expense" | "income" | "transfer" | undefined;
     openTransactionModal(catType, edit);
@@ -539,6 +542,24 @@ export default function LancamentosPage() {
 
     if (error) {
       console.error("Batch update error:", error);
+    } else {
+      clearSelection();
+      triggerRefresh();
+    }
+    setIsBatchUpdating(false);
+  };
+
+  // Batch ignore (set personal_amount = 0)
+  const batchIgnoreTransactions = async () => {
+    const ids = Array.from(effectiveSelectedIds);
+    if (ids.length === 0) return;
+    setIsBatchUpdating(true);
+    const { error } = await supabase
+      .from("transactions")
+      .update({ personal_amount: 0 })
+      .in("id", ids);
+    if (error) {
+      console.error("Batch ignore error:", error);
     } else {
       clearSelection();
       triggerRefresh();
@@ -1136,13 +1157,15 @@ export default function LancamentosPage() {
                           : "bg-slate-100 text-slate-500";
 
                         const canEdit = !isManualTransfer && !isAdjustRow;
+                        const hasPersonalAmount = tx.personal_amount != null;
+                        const isIgnored = hasPersonalAmount && (tx.personal_amount === "0" || tx.personal_amount === "0.00");
 
                         return (
                           <div
                             key={tx.id}
                             className={`flex w-full items-start gap-2 rounded-2xl border border-[var(--border)] bg-white px-3 py-2 text-left shadow-sm transition ${
                               canEdit ? "cursor-pointer hover:border-[var(--accent)] hover:shadow-md" : ""
-                            } ${effectiveSelectedIds.has(tx.id) ? "border-[var(--accent)] bg-blue-50" : ""}`}
+                            } ${effectiveSelectedIds.has(tx.id) ? "border-[var(--accent)] bg-blue-50" : ""} ${hasPersonalAmount ? "opacity-60" : ""}`}
                           >
                             {canEdit && (
                               <div className="flex shrink-0 items-center pt-3">
@@ -1198,6 +1221,11 @@ export default function LancamentosPage() {
                               <p className={`min-w-[88px] text-sm font-semibold ${valueTone}`}>
                                 {sign} {formattedValue}
                               </p>
+                              {isIgnored ? (
+                                <span className="mt-0.5 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Ignorada</span>
+                              ) : hasPersonalAmount ? (
+                                <span className="mt-0.5 text-[10px] text-[var(--muted)]">(pessoal)</span>
+                              ) : null}
                             </div>
                           </button>
                           </div>
@@ -1271,6 +1299,8 @@ export default function LancamentosPage() {
                       : categoryType === "income" ? "Receita" : categoryType === "expense" ? "Despesa" : "Outro";
                     const hasOriginalDescription = tx.original_description && tx.original_description !== tx.description;
                     const canEdit = !isManualTransfer && !isAdjustRow;
+                    const hasPersonalAmount = tx.personal_amount != null;
+                    const isIgnored = hasPersonalAmount && (tx.personal_amount === "0" || tx.personal_amount === "0.00");
 
                     return (
                       <tr
@@ -1278,7 +1308,7 @@ export default function LancamentosPage() {
                         onClick={() => canEdit && openEditModal(tx)}
                         className={`border-b border-[var(--border)] last:border-b-0 ${
                           canEdit ? "cursor-pointer transition hover:bg-slate-50" : ""
-                        } ${effectiveSelectedIds.has(tx.id) ? "bg-blue-50" : ""}`}
+                        } ${effectiveSelectedIds.has(tx.id) ? "bg-blue-50" : ""} ${hasPersonalAmount ? "opacity-60" : ""}`}
                       >
                         <td className="w-8 py-3" onClick={(e) => e.stopPropagation()}>
                           {canEdit && (
@@ -1311,7 +1341,12 @@ export default function LancamentosPage() {
                         <td className="py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{typeLabel}</td>
                         <td className="py-3 text-sm text-[var(--muted)]">{tx.account?.name ?? "Conta"}</td>
                         <td className={`py-3 text-right text-sm font-semibold ${valueTone}`}>
-                          {sign} {formattedValue}
+                          <span>{sign} {formattedValue}</span>
+                          {isIgnored ? (
+                            <span className="ml-1.5 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Ignorada</span>
+                          ) : hasPersonalAmount ? (
+                            <span className="ml-1 text-[10px] font-normal text-[var(--muted)]">(pessoal)</span>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -1439,6 +1474,14 @@ export default function LancamentosPage() {
                     </div>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={batchIgnoreTransactions}
+                  disabled={isBatchUpdating}
+                  className="rounded-full border border-slate-400 bg-slate-100 px-4 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-60"
+                >
+                  {isBatchUpdating ? "Salvando..." : "Ignorar"}
+                </button>
                 <button
                   type="button"
                   onClick={clearSelection}

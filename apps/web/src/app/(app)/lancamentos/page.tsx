@@ -1351,91 +1351,103 @@ export default function LancamentosPage() {
 
         {/* Batch action bar */}
         {effectiveSelectedIds.size > 0 && (
-          <div className="fixed bottom-6 left-4 right-4 z-40 mx-auto flex max-w-md items-center justify-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 shadow-lg sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:px-5">
-            <span className="text-sm font-semibold text-[var(--ink)]">
-              {effectiveSelectedIds.size} selecionado{effectiveSelectedIds.size > 1 ? "s" : ""}
-            </span>
+          <div className="fixed bottom-6 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border border-[var(--border)] bg-white px-4 py-3 shadow-lg sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:px-5">
             {batchCategoryId ? (
-              <>
-                <span className="text-xs text-[var(--muted)]">
-                  → {categories.find((c) => c.id === batchCategoryId)?.name ?? "Categoria"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => batchUpdateCategory(batchCategoryId)}
-                  disabled={isBatchUpdating}
-                  className="rounded-full border border-emerald-500 bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-                >
-                  {isBatchUpdating ? "Salvando..." : "Confirmar"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBatchCategoryId(null)}
-                  disabled={isBatchUpdating}
-                  className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50 disabled:opacity-60"
-                >
-                  Trocar
-                </button>
-              </>
+              <div className="flex flex-col gap-2">
+                <div className="text-center text-sm text-[var(--ink)]">
+                  <span className="font-semibold">{effectiveSelectedIds.size}</span>{" "}
+                  lançamento{effectiveSelectedIds.size > 1 ? "s" : ""} → <span className="font-semibold">{categories.find((c) => c.id === batchCategoryId)?.name ?? "Categoria"}</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => batchUpdateCategory(batchCategoryId)}
+                    disabled={isBatchUpdating}
+                    className="rounded-full border border-emerald-500 bg-emerald-500 px-5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                  >
+                    {isBatchUpdating ? "Salvando..." : "Confirmar"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchCategoryId(null)}
+                    disabled={isBatchUpdating}
+                    className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Trocar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    disabled={isBatchUpdating}
+                    className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             ) : (
-              <div className="relative">
+              <div className="flex items-center justify-center gap-3">
+                <span className="text-sm font-semibold text-[var(--ink)]">
+                  {effectiveSelectedIds.size} selecionado{effectiveSelectedIds.size > 1 ? "s" : ""}
+                </span>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsBatchCategoryOpen(!isBatchCategoryOpen)}
+                    disabled={isBatchUpdating}
+                    className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                  >
+                    Definir categoria
+                  </button>
+                  {isBatchCategoryOpen && (
+                    <div className="absolute bottom-full right-0 mb-2 w-[min(calc(100vw-32px),288px)] overflow-hidden rounded-xl border border-[var(--border)] bg-white shadow-lg sm:left-0 sm:right-auto sm:w-72">
+                      <div className="border-b border-[var(--border)] px-3 py-2">
+                        <input
+                          type="text"
+                          placeholder="Buscar categoria..."
+                          value={batchCategorySearch}
+                          onChange={(e) => setBatchCategorySearch(e.target.value)}
+                          className="w-full rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="max-h-60 overflow-y-auto">
+                        {batchCategoryOptions.length === 0 ? (
+                          <p className="px-3 py-2 text-sm text-[var(--muted)]">Nenhuma categoria encontrada</p>
+                        ) : (
+                          batchCategoryOptions.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => {
+                                setBatchCategoryId(opt.id);
+                                setIsBatchCategoryOpen(false);
+                                setBatchCategorySearch("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-50"
+                            >
+                              <span
+                                className={`inline-block h-2 w-2 rounded-full ${
+                                  opt.type === "income" ? "bg-emerald-400" : "bg-rose-400"
+                                }`}
+                              />
+                              {opt.label}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setIsBatchCategoryOpen(!isBatchCategoryOpen)}
-                  disabled={isBatchUpdating}
-                  className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                  onClick={clearSelection}
+                  className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50"
                 >
-                  Definir categoria
+                  Limpar
                 </button>
-                {isBatchCategoryOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 w-[min(calc(100vw-32px),288px)] overflow-hidden rounded-xl border border-[var(--border)] bg-white shadow-lg sm:left-0 sm:right-auto sm:w-72">
-                    <div className="border-b border-[var(--border)] px-3 py-2">
-                      <input
-                        type="text"
-                        placeholder="Buscar categoria..."
-                        value={batchCategorySearch}
-                        onChange={(e) => setBatchCategorySearch(e.target.value)}
-                        className="w-full rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="max-h-60 overflow-y-auto">
-                      {batchCategoryOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-sm text-[var(--muted)]">Nenhuma categoria encontrada</p>
-                      ) : (
-                        batchCategoryOptions.map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => {
-                              setBatchCategoryId(opt.id);
-                              setIsBatchCategoryOpen(false);
-                              setBatchCategorySearch("");
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-slate-50"
-                          >
-                            <span
-                              className={`inline-block h-2 w-2 rounded-full ${
-                                opt.type === "income" ? "bg-emerald-400" : "bg-rose-400"
-                              }`}
-                            />
-                            {opt.label}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
-            <button
-              type="button"
-              onClick={clearSelection}
-              disabled={isBatchUpdating}
-              className="rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-semibold text-[var(--muted)] transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              Limpar
-            </button>
           </div>
         )}
 

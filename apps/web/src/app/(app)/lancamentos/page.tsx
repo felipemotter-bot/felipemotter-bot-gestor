@@ -1349,7 +1349,7 @@ export default function LancamentosPage() {
 
         {/* Batch action bar */}
         {effectiveSelectedIds.size > 0 && (
-          <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-5 py-3 shadow-lg">
+          <div className="fixed bottom-6 left-4 right-4 z-40 mx-auto flex max-w-md items-center justify-center gap-3 rounded-2xl border border-[var(--border)] bg-white px-4 py-3 shadow-lg sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:px-5">
             <span className="text-sm font-semibold text-[var(--ink)]">
               {effectiveSelectedIds.size} selecionado{effectiveSelectedIds.size > 1 ? "s" : ""}
             </span>
@@ -1363,7 +1363,7 @@ export default function LancamentosPage() {
                 {isBatchUpdating ? "Salvando..." : "Definir categoria"}
               </button>
               {isBatchCategoryOpen && (
-                <div className="absolute bottom-full left-0 mb-2 w-72 overflow-hidden rounded-xl border border-[var(--border)] bg-white shadow-lg">
+                <div className="absolute bottom-full right-0 mb-2 w-[min(calc(100vw-32px),288px)] overflow-hidden rounded-xl border border-[var(--border)] bg-white shadow-lg sm:left-0 sm:right-auto sm:w-72">
                   <div className="border-b border-[var(--border)] px-3 py-2">
                     <input
                       type="text"

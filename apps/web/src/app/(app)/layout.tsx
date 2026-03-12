@@ -112,7 +112,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(15,23,42,0.05)_1px,transparent_1px),linear-gradient(180deg,rgba(15,23,42,0.05)_1px,transparent_1px)] bg-[size:80px_80px] opacity-35" />
       </div>
 
-      <div className="relative mx-auto min-h-screen w-full max-w-[100vw] px-3 py-6 sm:px-4">
+      <div className="relative mx-auto min-h-screen w-full px-3 py-6 sm:px-4">
         <div className="relative min-h-[calc(100vh-3rem)] overflow-x-hidden">
           <Sidebar
             isCollapsed={isSidebarCollapsed}

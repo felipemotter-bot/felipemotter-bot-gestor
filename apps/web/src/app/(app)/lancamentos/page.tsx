@@ -488,6 +488,8 @@ export default function LancamentosPage() {
   };
 
   // Selection helpers
+  const effectiveSelectedIds = selectedIds;
+
   const editableVisibleIds = useMemo(
     () =>
       visibleTransactions
@@ -521,9 +523,6 @@ export default function LancamentosPage() {
     setIsBatchCategoryOpen(false);
     setBatchCategorySearch("");
   };
-
-  // Prune selection to only visible transaction IDs
-  const effectiveSelectedIds = selectedIds;
 
   // Batch update category
   const batchUpdateCategory = async (categoryId: string) => {
